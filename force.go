@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	DefaultAPIVersion = "43.0"
+	DefaultAPIVersion = "51.0"
 	DefaultClientID   = "simpleforce"
 	DefaultURL        = "https://login.salesforce.com"
 
@@ -33,7 +33,7 @@ var (
 
 // Client is the main instance to access salesforce.
 type Client struct {
-	sessionID string
+	SessionID string
 	user      struct {
 		id       string
 		name     string
@@ -43,7 +43,7 @@ type Client struct {
 	clientID      string
 	apiVersion    string
 	baseURL       string
-	instanceURL   string
+	InstanceURL   string
 	useToolingAPI bool
 	httpClient    *http.Client
 }
@@ -65,11 +65,11 @@ func (client *Client) Query(q string) (*QueryResult, error) {
 	var u string
 	if strings.HasPrefix(q, "/services/data") {
 		// q is nextRecordsURL.
-		u = fmt.Sprintf("%s%s", client.baseURL, q)
+		u = fmt.Sprintf("%s%s", client.InstanceURL, q)
 	} else {
 		// q is SOQL.
 		formatString := "%s/services/data/v%s/query?q=%s"
-		baseURL := client.instanceURL
+		baseURL := client.InstanceURL
 		if client.useToolingAPI {
 			formatString = strings.Replace(formatString, "query", "tooling/query", -1)
 		}
@@ -108,7 +108,7 @@ func (client *Client) SObject(typeName ...string) *SObject {
 
 // isLoggedIn returns if the login to salesforce is successful.
 func (client *Client) isLoggedIn() bool {
-	return client.sessionID != ""
+	return client.SessionID != ""
 }
 
 // LoginPassword signs into salesforce using password. token is optional if trusted IP is configured.
@@ -183,9 +183,9 @@ func (client *Client) LoginPassword(username, password, token string) error {
 		return err
 	}
 
-	// Now we should all be good and the sessionID can be used to talk to salesforce further.
-	client.sessionID = loginResponse.SessionID
-	client.instanceURL = parseHost(loginResponse.ServerURL)
+	// Now we should all be good and the SessionID can be used to talk to salesforce further.
+	client.SessionID = loginResponse.SessionID
+	client.InstanceURL = parseHost(loginResponse.ServerURL)
 	client.user.id = loginResponse.UserID
 	client.user.name = loginResponse.UserName
 	client.user.email = loginResponse.UserEmail
@@ -202,7 +202,7 @@ func (client *Client) httpRequest(method, url string, body io.Reader) ([]byte, e
 		return nil, err
 	}
 
-	req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", client.sessionID))
+	req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", client.SessionID))
 	req.Header.Add("Content-Type", "application/json")
 
 	resp, err := client.httpClient.Do(req)
@@ -210,19 +210,25 @@ func (client *Client) httpRequest(method, url string, body io.Reader) ([]byte, e
 		return nil, err
 	}
 	defer resp.Body.Close()
+	b, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		log.Println(logPrefix, "status:", resp.StatusCode)
+		log.Println(logPrefix, "status:", resp.StatusCode, string(b))
 		return nil, ErrFailure
 	}
 
-	return ioutil.ReadAll(resp.Body)
+	// println(string(b))
+
+	return b, nil
 }
 
 // makeURL generates a REST API URL based on baseURL, APIVersion of the client.
 func (client *Client) makeURL(req string) string {
 	client.apiVersion = strings.Replace(client.apiVersion, "v", "", -1)
-	retURL := fmt.Sprintf("%s/services/data/v%s/%s", client.instanceURL, client.apiVersion, req)
+	retURL := fmt.Sprintf("%s/services/data/v%s/%s", client.InstanceURL, client.apiVersion, req)
 	return retURL
 }
 
@@ -259,7 +265,7 @@ func (client *Client) DownloadFile(contentVersionID string, filepath string) err
 	req, err := http.NewRequest("GET", url, nil)
 	req.Header.Add("Content-Type", "application/json; charset=UTF-8")
 	req.Header.Add("Accept", "application/json")
-	req.Header.Add("Authorization", "Bearer "+client.sessionID)
+	req.Header.Add("Authorization", "Bearer "+client.SessionID)
 
 	// resp, err := http.Get(url)
 	resp, err := httpClient.Do(req)
